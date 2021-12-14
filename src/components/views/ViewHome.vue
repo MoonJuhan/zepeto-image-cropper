@@ -56,7 +56,7 @@ export default {
 
       console.log(startY, endY)
 
-      drawRefinedImage(img, startY + 40, endY)
+      drawRefinedImage(img, startY + 40, endY - 40)
     }
 
     const drawRefinedImage = (img, sy, ey) => {
