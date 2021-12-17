@@ -17,7 +17,6 @@ export default {
 
     const readFile = (file, length) => {
       const reader = new FileReader()
-      console.log(file.name)
 
       reader.onload = (event) => {
         var img = new Image()
@@ -167,7 +166,6 @@ export default {
       ctx.fillRect(0, 0, refNewCanvas.value.width, refNewCanvas.value.height)
 
       ctx.drawImage(img, (newSize - img.width) / 2, -maxPos.sy, img.width, img.height)
-      console.dir(img)
     }
 
     const downloadImage = (name) => {
