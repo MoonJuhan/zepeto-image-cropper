@@ -1,66 +1,163 @@
 <template>
   <div class="view-home">
-    <canvas ref="refCanvas"></canvas>
-    <canvas ref="refNewCanvas"></canvas>
-    <input type="file" @change="onChangeFile" />
+    <canvas ref="refCanvas" />
+    <canvas ref="refNewCanvas" />
+    <input type="file" multiple @change="onChangeFile" />
   </div>
 </template>
 
 <script>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 export default {
   setup() {
+    const imageList = ref([])
     const refCanvas = ref(null)
     const refNewCanvas = ref(null)
 
-    const onChangeFile = (e) => {
+    const readFile = (file, length) => {
       const reader = new FileReader()
+      console.log(file.name)
 
-      reader.onload = function (event) {
+      reader.onload = (event) => {
         var img = new Image()
 
-        img.onload = function () {
-          console.log(img.height)
-          refCanvas.value.width = img.width
-          refCanvas.value.height = img.height
-          refCanvas.value.getContext('2d').drawImage(img, 0, 0)
-
-          refineImage(img)
+        img.onload = () => {
+          imageList.value.push({ img, name: file.name })
+          if (length === imageList.value.length) {
+            imageProcessing()
+          }
         }
+
         img.src = event.target.result
       }
 
-      reader.readAsDataURL(e.target.files[0])
+      reader.readAsDataURL(file)
     }
 
-    const refineImage = (img) => {
+    const onChangeFile = async (e) => {
+      for (let i = 0; i < e.target.files.length; i++) {
+        readFile(e.target.files[i], e.target.files.length)
+      }
+    }
+
+    const imageProcessing = async () => {
+      for (let i in imageList.value) {
+        drawImage(imageList.value[i].img)
+        const maxPos = await refineImage(imageList.value[i].img)
+        drawRefinedImage(imageList.value[i].img, maxPos)
+        downloadImage(imageList.value[i].name)
+      }
+    }
+
+    const drawImage = async (img) => {
+      refCanvas.value.width = img.width
+      refCanvas.value.height = img.height
+      refCanvas.value.getContext('2d').drawImage(img, 0, 0)
+    }
+
+    const refineImage = async (img) => {
       const ctx = refCanvas.value.getContext('2d')
       const { width, height } = img
 
-      let startY = 0
-      let endY = 0
+      const superiorColorRate = []
 
-      console.log(width, height)
-      for (let i = 0; i < height; i += 1) {
-        const ImgData = ctx.getImageData(width / 2, i, 1, 1).data
-        if (ImgData[0] === 255 && ImgData[1] === 255 && ImgData[2] === 255) {
-          if (i > 130 && i < 170) startY = i
-          if (i > height / 2) {
-            if (endY === 0) endY = i
+      const checkSuperiorColor = (colorRate, colorList) => {
+        colorList.forEach((el) => {
+          const findColorRate = colorRate.find((r) => r.colorStr === el)
+
+          if (findColorRate) {
+            findColorRate.num++
+          } else {
+            colorRate.push({
+              colorStr: el,
+              num: 1,
+            })
           }
-        }
-        console.log(`${width / 2},${i} : ${ImgData[0]} ${ImgData[1]} ${ImgData[2]} ${ImgData[3]}`)
-        // ctx.putImageData(ctx.getImageData(width / 2, i, 1, 1), (width / 2) + 50, i);
+        })
       }
 
-      console.log(startY, endY)
+      for (let i = 0; i < height; i += 1) {
+        const ImgData = ctx.getImageData(width / 3, i, 1, 1).data
+        const colorStr = ImgData.join('_')
+        checkSuperiorColor(superiorColorRate, [colorStr])
+      }
 
-      drawRefinedImage(img, startY + 40, endY - 40)
+      const superiorColorStr = superiorColorRate.filter((r) => r.num > 4).sort((a, b) => b.num - a.num)[0].colorStr
+      const scanWidth = parseInt(width * 0.6)
+
+      const maxPos = {
+        sx: -1,
+        sy: -1,
+        ex: -1,
+        ey: -1,
+      }
+
+      const scanLine = (refinedImgDatas, type, i) => {
+        const colorStrs = refinedImgDatas
+          .map((el, index) => {
+            if (index % 4 === 0) {
+              return [
+                refinedImgDatas[index],
+                refinedImgDatas[index + 1],
+                refinedImgDatas[index + 2],
+                refinedImgDatas[index + 3],
+              ].join('_')
+            }
+
+            return null
+          })
+          .filter((el) => el)
+
+        const lineColorRate = []
+        checkSuperiorColor(lineColorRate, colorStrs)
+
+        if (lineColorRate.length === 1 && lineColorRate[0].colorStr === superiorColorStr && maxPos[type] === -1) {
+          maxPos[type] = i
+        }
+      }
+
+      // Go Up
+      for (let i = parseInt(height / 2); i > 0; i--) {
+        const refinedImgDatas = []
+
+        ctx.getImageData((width - scanWidth) / 2, i, scanWidth, 1).data.forEach((el) => refinedImgDatas.push(el))
+
+        scanLine(refinedImgDatas, 'sy', i)
+      }
+
+      // Go Down
+      for (let i = parseInt(height / 2); i < height; i++) {
+        const refinedImgDatas = []
+
+        ctx.getImageData((width - scanWidth) / 2, i, scanWidth, 1).data.forEach((el) => refinedImgDatas.push(el))
+
+        scanLine(refinedImgDatas, 'ey', i)
+      }
+
+      // Go Left
+      for (let i = parseInt(width / 2); i > 0; i--) {
+        const refinedImgDatas = []
+
+        ctx.getImageData(i, (height - scanWidth) / 2, 1, scanWidth).data.forEach((el) => refinedImgDatas.push(el))
+
+        scanLine(refinedImgDatas, 'sx', i)
+      }
+
+      // Go Right
+      for (let i = parseInt(width / 2); i < width; i++) {
+        const refinedImgDatas = []
+
+        ctx.getImageData(i, (height - scanWidth) / 2, 1, scanWidth).data.forEach((el) => refinedImgDatas.push(el))
+
+        scanLine(refinedImgDatas, 'ex', i)
+      }
+
+      return maxPos
     }
 
-    const drawRefinedImage = (img, sy, ey) => {
-      const newSize = ey - sy
+    const drawRefinedImage = (img, maxPos) => {
+      const newSize = maxPos.ey - maxPos.sy
       refNewCanvas.value.width = newSize
       refNewCanvas.value.height = newSize
 
@@ -69,13 +166,12 @@ export default {
       ctx.fillStyle = '#FBFBFD'
       ctx.fillRect(0, 0, refNewCanvas.value.width, refNewCanvas.value.height)
 
-      ctx.drawImage(img, (newSize - img.width) / 2, -sy, img.width, img.height)
-
-      downloadImage()
+      ctx.drawImage(img, (newSize - img.width) / 2, -maxPos.sy, img.width, img.height)
+      console.dir(img)
     }
 
-    const downloadImage = () => {
-      var dataURL = refNewCanvas.value.toDataURL('image/png')
+    const downloadImage = (name) => {
+      let dataURL = refNewCanvas.value.toDataURL('image/png')
 
       dataURL = dataURL.replace(/^data:image\/[^;]*/, 'data:application/octet-stream')
 
@@ -85,7 +181,7 @@ export default {
       )
 
       const aTag = document.createElement('a')
-      aTag.download = 'from_canvas.png'
+      aTag.download = `resized_${name}`
       aTag.href = dataURL
       aTag.click()
     }
